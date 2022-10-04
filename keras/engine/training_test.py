@@ -3732,7 +3732,8 @@ class TestTrainingWithMetrics(test_combinations.TestCase):
         model.add(layers_module.Masking(mask_value=0, input_shape=(2, 1)))
         model.add(
             layers_module.TimeDistributed(
-                layers_module.Dense(1, kernel_initializer="ones")
+                layers_module.Dense(1, kernel_initializer="ones",
+                                    trainable=False)
             )
         )
         model.compile(
@@ -3743,15 +3744,19 @@ class TestTrainingWithMetrics(test_combinations.TestCase):
         )
 
         # verify that masking is applied.
-        x = np.array([[[1], [1]], [[1], [1]], [[0], [0]]])
-        y = np.array([[[1], [1]], [[0], [1]], [[1], [1]]])
+        x = np.array([[[1], [1]],
+                      [[1], [1]],
+                      [[0], [0]]]) # third row is masked
+        y = np.array([[[1], [1]],
+                      [[0], [1]],
+                      [[1], [1]]])
         scores = model.train_on_batch(x, y)
         self.assertArrayNear(scores, [0.25, 0.75], 0.1)
 
         # verify that masking is combined with sample weights.
         w = np.array([3, 2, 4])
         scores = model.train_on_batch(x, y, sample_weight=w)
-        self.assertArrayNear(scores, [0.3328, 0.8], 0.001)
+        self.assertArrayNear(scores, [0.5, 0.8], 0.001)
 
     @test_combinations.run_all_keras_modes
     def test_add_metric_with_tensor_on_model(self):
