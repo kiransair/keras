@@ -106,15 +106,16 @@ class _BaseOptimizer(tf.__internal__.tracking.AutoTrackable):
         legacy_kwargs = {
             "lr",
             "decay",
-            "gradient_transformers",
             "gradient_aggregator",
+            "gradient_transformers",
         }
         for k in kwargs:
             if k in legacy_kwargs:
-                logging.warning(
-                    "%s is deprecated in `optimizer_experimental.Optimizer`"
-                    ", please check the docstring for valid arguments.",
-                    k,
+                raise ValueError(
+                    "{k} is deprecated in the new Keras optimizer, please check"
+                    "the docstring for valid arguments, or use the legacy "
+                    "optimizer, e.g., "
+                    f"tf.keras.optimizers.legacy.{self.__class__.__name__}."
                 )
             else:
                 raise TypeError(

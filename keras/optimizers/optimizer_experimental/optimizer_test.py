@@ -209,14 +209,9 @@ class OptimizerFuntionalityTest(tf.test.TestCase, parameterized.TestCase):
         clipped_grad = optimizer._clip_gradients(grad)
         self.assertAllClose(clipped_grad[0], [0.5, 0.5])
 
-    def testPassingLegacyArgsRaiseWarning(self):
-        with self.assertLogs(level="WARNING") as log_output:
-            logging.set_verbosity(logging.WARNING)
+    def testPassingLegacyArgsRaiseError(self):
+        with self.assertRaisesRegex(ValueError, "lr is deprecated*"):
             _ = adam_new.Adam(clipnorm=1, decay=0.5)
-            expected_log = "decay is deprecated in"
-            output = log_output[0][0].message
-
-            self.assertTrue(re.search(expected_log, output))
 
     def testPassingLegacyClipnorm(self):
         optimizer = adam_new.Adam(clipnorm=1)
