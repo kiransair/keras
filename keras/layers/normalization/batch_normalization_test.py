@@ -225,6 +225,26 @@ class BatchNormalizationTest(test_combinations.TestCase):
         train_loss = model.train_on_batch(test_data, test_targets)
         self.assertAlmostEqual(test_loss, train_loss)
 
+    @test_combinations.run_all_keras_modes
+    def test_batchnorm_ignore_masked_values(self):
+        padded_data = np.array(
+            [[[1, 5], [2, 5], [0, 0], [0, 0]] for _ in range(10)],
+            dtype="float32",
+        )  # Pad value of 0
+
+        inputs = keras.layers.Input((None, 2))
+        masked = keras.layers.Masking()(inputs)
+        normed = keras.layers.BatchNormalization(momentum=0.0)(masked)
+        model = keras.models.Model(inputs, normed)
+        model.compile(
+            "rmsprop", "mse", run_eagerly=test_utils.should_run_eagerly()
+        )
+
+        model.fit(x=padded_data, y=padded_data, batch_size=10, epochs=5)
+
+        self.assertAllEqual(model.layers[2].moving_mean, [1.5, 5.0])
+        self.assertAllEqual(model.layers[2].moving_variance, [0.25, 0.0])
+
     @test_combinations.run_all_keras_modes(always_skip_v1=True)
     def test_eager_batchnorm_in_custom_model_call_with_tf_function(self):
         class MyModel(keras.Model):
@@ -394,6 +414,15 @@ class BatchNormalizationV2Test(test_combinations.TestCase):
         inp = keras.layers.Input(shape=(4, 4))
         with self.assertRaisesRegex(ValueError, "4D or 5D input tensors"):
             norm(inp)
+
+        norm = batch_normalization.BatchNormalization(fused=True, axis=[3])
+        self.assertEqual(norm.fused, True)
+        inp = keras.layers.Input(shape=(4, 4, 4))
+        masked_inp = keras.layers.Masking()(inp)
+        with self.assertRaisesRegex(
+            ValueError, "Input mask.*fused.*not supported"
+        ):
+            norm(masked_inp)
 
     def test_updates_in_wrap_function(self):
         def my_func():

@@ -111,7 +111,8 @@ class BatchNormalizationBase(Layer):
         the faster implementation if possible. If False, do not used the fused
         implementation. Note that in TensorFlow 1.x, the meaning of
         `fused=True` is different: if `False`, the layer uses the
-        system-recommended implementation.
+        system-recommended implementation. You can not use `fused=True` if a
+        mask is passed in the `call()` method.
       trainable: Boolean, if `True` the variables will be marked as trainable.
       virtual_batch_size: An `int`. By default, `virtual_batch_size` is `None`,
         which means batch normalization is performed across the whole batch.
@@ -140,6 +141,8 @@ class BatchNormalizationBase(Layer):
           and variance of the current batch of inputs.
         - `training=False`: The layer will normalize its inputs using the mean
           and variance of its moving statistics, learned during training.
+      mask: Binary tensor of shape broadcastable to `inputs` tensor indicating
+        the positions for which the mean and variance should be computed.
 
     Input shape: Arbitrary. Use the keyword argument `input_shape` (tuple of
       integers, does not include the samples axis) when using this layer as the
@@ -571,8 +574,10 @@ class BatchNormalizationBase(Layer):
                 with tf.compat.v1.colocate_with(variable):
                     return tf.compat.v1.assign(variable, value, name=scope)
 
-    def _fused_batch_norm(self, inputs, training):
+    def _fused_batch_norm(self, inputs, mask, training):
         """Returns the output of fused batch norm."""
+        if mask is not None:
+            raise ValueError("Input mask with `fused=True` is not supported.")
         if self.center:
             beta = self.beta
         else:
@@ -787,12 +792,28 @@ class BatchNormalizationBase(Layer):
 
         return (r, d, out_mean, out_variance)
 
-    def _calculate_mean_and_var(self, inputs, reduction_axes, keep_dims):
-        return tf.nn.moments(inputs, reduction_axes, keepdims=keep_dims)
+    def _calculate_mean_and_var(
+        self, inputs, reduction_axes, keep_dims, mask=None
+    ):
+        if mask is None:
+            return tf.nn.moments(inputs, reduction_axes, keepdims=keep_dims)
+        else:
+            mask_weights = tf.cast(
+                mask, self.compute_dtype, name="mask_weights"
+            )
+            mask_weights = tf.expand_dims(
+                mask_weights, axis=-1, name="mask_weights_broadcasted"
+            )
+            return tf.nn.weighted_moments(
+                inputs,
+                axes=reduction_axes,
+                frequency_weights=mask_weights,
+                keepdims=keep_dims,
+            )
 
-    def _moments(self, inputs, reduction_axes, keep_dims):
+    def _moments(self, inputs, reduction_axes, keep_dims, mask):
         mean, variance = self._calculate_mean_and_var(
-            inputs, reduction_axes, keep_dims
+            inputs, reduction_axes, keep_dims, mask=mask
         )
         # TODO(b/129279393): Support zero batch input in non
         # DistributionStrategy code as well.
@@ -818,7 +839,7 @@ class BatchNormalizationBase(Layer):
                 training = False
         return training
 
-    def call(self, inputs, training=None):
+    def call(self, inputs, mask=None, training=None):
         inputs = tf.cast(inputs, self.compute_dtype)
         training = self._get_training_value(training)
 
@@ -846,7 +867,9 @@ class BatchNormalizationBase(Layer):
                 return outputs
 
         if self.fused:
-            outputs = self._fused_batch_norm(inputs, training=training)
+            outputs = self._fused_batch_norm(
+                inputs, mask=mask, training=training
+            )
             if self.virtual_batch_size is not None:
                 # Currently never reaches here since fused_batch_norm does not
                 # support virtual batching
@@ -921,6 +944,7 @@ class BatchNormalizationBase(Layer):
                 tf.cast(inputs, self._param_dtype),
                 reduction_axes,
                 keep_dims=keep_dims,
+                mask=mask,
             )
 
             moving_mean = self.moving_mean
@@ -1196,7 +1220,12 @@ class SyncBatchNormalization(BatchNormalizationBase):
             **kwargs,
         )
 
-    def _calculate_mean_and_var(self, x, axes, keep_dims):
+    def _calculate_mean_and_var(self, x, axes, keep_dims, mask=None):
+        if mask is not None:
+            raise NotImplementedError(
+                "Masking support for SyncBatchNormalization is not implemented "
+                "yet."
+            )
 
         with backend.name_scope("moments"):
             # The dynamic range of fp16 is too limited to support the collection
